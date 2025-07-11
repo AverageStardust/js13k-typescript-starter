@@ -13,6 +13,8 @@ const htmlMinify = require('html-minifier');
 const tmp = require('tmp');
 const ClosureCompiler = require('google-closure-compiler').compiler;
 
+const sizeGoal = 1024 * 13;
+
 export default defineConfig(({ command, mode }) => {
   const config = {
     server: {
@@ -143,7 +145,13 @@ function roadrollerPlugin(): Plugin {
  */
 async function embedJs(html: string, chunk: OutputChunk): Promise<string> {
   const scriptTagRemoved = html.replace(new RegExp(`<script[^>]*?src=[\./]*${chunk.fileName}[^>]*?></script>`), '');
-  const htmlInJs = `document.write('${scriptTagRemoved}');` + chunk.code.trim();
+
+  let htmlInJs;
+  if (scriptTagRemoved.length > 0) {
+    htmlInJs = `document.write('${scriptTagRemoved}');` + chunk.code.trim();
+  } else {
+    htmlInJs = chunk.code.trim();
+  }
 
   const inputs: Input[] = [
     {
@@ -157,7 +165,7 @@ async function embedJs(html: string, chunk: OutputChunk): Promise<string> {
   if (process.env.USE_RR_CONFIG) {
     try {
       options = JSON.parse(await fs.readFile(`${__dirname}/roadroller-config.json`, 'utf-8'));
-    } catch(error) {
+    } catch (error) {
       throw new Error('Roadroller config not found. Generate one or use the regular build option');
     }
   } else {
@@ -170,7 +178,15 @@ async function embedJs(html: string, chunk: OutputChunk): Promise<string> {
     packer.optimize(process.env.LEVEL_2_BUILD ? 2 : 0) // Regular builds use level 2, but rr config builds use the supplied params
   ]);
   const { firstLine, secondLine } = packer.makeDecoder();
-  return `<script>\n${firstLine}\n${secondLine}\n</script>`;
+
+  const uncompressedScript = `<script>${htmlInJs}</script>`
+  const compressedScript = `<script>${firstLine}${secondLine}</script>`;
+
+  if (uncompressedScript.length <= compressedScript.length) {
+    return uncompressedScript;
+  } else {
+    return compressedScript;
+  }
 }
 
 /**
@@ -180,9 +196,17 @@ async function embedJs(html: string, chunk: OutputChunk): Promise<string> {
  * @returns The transformed HTML with the CSS embedded.
  */
 function embedCss(html: string, asset: OutputAsset): string {
-  const reCSS = new RegExp(`<link rel="stylesheet"[^>]*?href="[\./]*${asset.fileName}"[^>]*?>`);
-  const code = `<style>${new CleanCSS({ level: 2 }).minify(asset.source as string).styles}</style>`;
-  return html.replace(reCSS, code);
+  const cssRegEx = new RegExp(`<link rel="stylesheet"[^>]*?href="[\./]*${asset.fileName}"[^>]*?>`);
+  const code = new CleanCSS({ level: 2 }).minify(asset.source as string).styles;
+
+  let tag;
+  if (code.length > 0) {
+    tag = `<style>${code}</style>`;
+  } else {
+    tag = '';
+  }
+
+  return html.replace(cssRegEx, tag);
 }
 
 /**
@@ -202,7 +226,8 @@ function ectPlugin(): Plugin {
         const result = execFileSync(ect, args);
         console.log('ECT result', result.toString().trim());
         const stats = statSync('dist/index.zip');
-        console.log('ZIP size', stats.size);
+        const percent = Math.floor(stats.size / sizeGoal * 1000) / 10;
+        console.log(`\n${stats.size}/${sizeGoal} (${percent}%)`);
       } catch (err) {
         console.log('ECT error', err);
       }
