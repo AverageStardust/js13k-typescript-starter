@@ -18,7 +18,7 @@
   "scripts": {
     "dev": "vite serve",
     "build": "cross-env LEVEL_2_BUILD=true vite build",
-    "find-best": "node find-best-roadroller.js",
+    "find-best": "node find-best-roadroller.cjs",
     "build-best": "cross-env USE_RR_CONFIG=true vite build"
   },
   "author": "Rob Louie"
