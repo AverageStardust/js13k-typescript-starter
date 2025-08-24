@@ -6,12 +6,10 @@ import { OutputAsset, OutputChunk } from 'rollup';
 import { Input, InputAction, InputType, Packer } from 'roadroller';
 import CleanCSS from 'clean-css';
 import { statSync } from 'fs';
-const { execFileSync } = require('child_process');
 import ect from 'ect-bin';
-
-const htmlMinify = require('html-minifier');
-const tmp = require('tmp');
-const ClosureCompiler = require('google-closure-compiler').compiler;
+import {defaultTerserOptions} from "./terser.config";
+import {execFileSync} from "child_process";
+import htmlMinify from "html-minifier";
 
 const sizeGoal = 1024 * 13;
 
@@ -25,7 +23,7 @@ export default defineConfig(({ command, mode }) => {
         '@': path.resolve(__dirname, './src'),
       }
     },
-    plugins: undefined
+    plugins: [typescriptPlugin()]
   };
 
   if (command === 'build') {
@@ -35,8 +33,8 @@ export default defineConfig(({ command, mode }) => {
     config.base = '';
     // @ts-ignore
     config.build = {
-      minify: false,
-      target: 'es2020',
+      minify: 'terser',
+      target: 'es2022',
       modulePreload: { polyfill: false },
       assetsInlineLimit: 800,
       assetsDir: '',
@@ -46,59 +44,22 @@ export default defineConfig(({ command, mode }) => {
           manualChunks: undefined,
           assetFileNames: `[name].[ext]`
         },
-      }
+      },
+      terserOptions: defaultTerserOptions,
     };
     // @ts-ignore
-    config.plugins = [typescriptPlugin(), closurePlugin(), roadrollerPlugin(), ectPlugin()];
+    config.plugins = [typescriptPlugin(), roadrollerPlugin(), ectPlugin()];
   }
 
   return config;
 });
 
-function closurePlugin(): Plugin {
-  return {
-    name: 'closure-compiler',
-    // @ts-ignore
-    renderChunk: applyClosure,
-    enforce: 'post',
-  }
-}
-
-async function applyClosure(js: string, chunk: any) {
-  const tmpobj = tmp.fileSync();
-  // replace all consts with lets to save about 50-70 bytes
-  // ts-ignore
-  js = js.replaceAll('const ', 'let ');
-
-  await fs.writeFile(tmpobj.name, js);
-  const closureCompiler = new ClosureCompiler({
-    js: tmpobj.name,
-    externs: 'externs.js',
-    compilation_level: 'ADVANCED',
-    language_in: 'ECMASCRIPT_2020',
-    language_out: 'ECMASCRIPT_2020',
-  });
-  return new Promise((resolve, reject) => {
-    closureCompiler.run((_exitCode: string, stdOut: string, stdErr: string) => {
-      if (stdOut !== '') {
-        resolve({ code: stdOut });
-      } else if (stdErr !== '') { // only reject if stdout isn't generated
-        reject(stdErr);
-        return;
-      }
-
-      console.warn(stdErr); // If we make it here, there were warnings but no errors
-    });
-  })
-}
-
-
 function roadrollerPlugin(): Plugin {
   return {
     name: 'vite:roadroller',
     transformIndexHtml: {
-      enforce: 'post',
-      transform: async (html: string, ctx?: IndexHtmlTransformContext): Promise<string> => {
+      order: 'post',
+      handler: async (html: string, ctx?: IndexHtmlTransformContext): Promise<string> => {
         // Only use this plugin during build
         if (!ctx || !ctx.bundle) {
           return html;
